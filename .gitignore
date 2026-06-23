@@ -1,0 +1,8 @@
+node_modules/
+.tmp/
+*.log
+.DS_Store
+*.swp
+*.swo
+/tmp/auto-apply-*
+tray/tray-icon.png

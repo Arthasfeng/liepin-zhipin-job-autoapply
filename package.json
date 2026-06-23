@@ -1,0 +1,21 @@
+{
+  "name": "auto-apply",
+  "version": "1.0.0",
+  "description": "猎聘/Boss直聘 自动化投递平台 — 多账号并行，健康值守，系统托盘控制",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "tray": "electron tray/main.js",
+    "liepin": "node index.js --account liepin-a",
+    "boss": "node index.js --account boss-a",
+    "menu": "node menu.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^42.4.1"
+  }
+}
