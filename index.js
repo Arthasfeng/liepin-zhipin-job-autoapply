@@ -44,6 +44,31 @@ function clearRunState(acctId) {
   try { fs.unlinkSync(statePath(acctId)); } catch(e) {}
 }
 
+// 每日汇总统计
+var DAILY_STATS_FILE = '/tmp/auto-apply-daily-stats.json';
+
+function loadDailyStats() {
+  try { return JSON.parse(fs.readFileSync(DAILY_STATS_FILE, 'utf8')); } catch(e) { return {}; }
+}
+
+function saveDailyStats(acct, scanned, success, fail, skip) {
+  try {
+    var all = loadDailyStats();
+    var today = new Date().toISOString().slice(0, 10);  // 2026-06-23
+    if (!all[today]) all[today] = {};
+    var d = all[today];
+    if (!d[acct.id]) d[acct.id] = { name: acct.name, platform: acct.platform, scanned: 0, success: 0, fail: 0, skip: 0 };
+    d[acct.id].scanned += scanned || 0;
+    d[acct.id].success += success || 0;
+    d[acct.id].fail += fail || 0;
+    d[acct.id].skip += skip || 0;
+    // 只保留最近7天
+    var keys = Object.keys(all).sort();
+    while (keys.length > 7) { delete all[keys.shift()]; }
+    fs.writeFileSync(DAILY_STATS_FILE, JSON.stringify(all, null, 2));
+  } catch(e) {}
+}
+
 class Runner {
   constructor(acct, engine) {
     this.acct = acct;
@@ -222,6 +247,14 @@ class Runner {
       }
     }
     clearRunState(this.acct.id); // 全部完成，清除断点
+    // 保存最终统计（兼容 Boss 和 猎聘）
+    var flowStats = this.flow ? this.flow.stats : {};
+    saveDailyStats(this.acct,
+      (flowStats.success||0) + (flowStats.fail_chat||0) + (flowStats.skip_chatted||0) + (flowStats.skip_processed||0),
+      flowStats.success || 0,
+      (flowStats.fail_chat||0) + (flowStats.fail_resume||0) + (flowStats.fail_confirm||0) + (flowStats.fail_dialog||0),
+      (flowStats.skip_chatted||0) + (flowStats.skip_processed||0)
+    );
     log('['+a.name+'] 完成');
   }
 
@@ -334,10 +367,11 @@ class Runner {
             await this._switchBossMode(modes[this._modeIndex]);
             this._scrollFailCount = 0;
           } else {
+            process.stdout.write('·');
             await sleep(3000);
           }
         } else {
-          this._scrollFailCount = 0; // 有新卡片，重置计数
+          this._scrollFailCount = 0;
         }
       } else {
         // 有处理过的卡片但当前页已处理完 → 滚动加载更多
@@ -348,6 +382,10 @@ class Runner {
       reportStatus(this.acct, { status: 'running', kw: this._kw, mode: this._modeIndex,
         stats: this.flow ? this.flow.stats : {}, kwStats: kwStats, frozen: this._frozen });
     }
+
+    // 保存每日统计
+    var totalCards = kwStats.success + kwStats.fail + kwStats.skip;
+    saveDailyStats(this.acct, totalCards, kwStats.success, kwStats.fail, kwStats.skip);
 
     var elapsed = Math.round((Date.now()-kwStartTime)/1000);
     log(''); log('\u2550\u2550\u2550'+this._kw+'\u2550\u2550\u2550');
@@ -512,10 +550,6 @@ class Runner {
 }
 
 async function main() {
-  // 清理所有旧 Chrome 进程（避免多窗口）
-  require('child_process').execSync('pkill -f "Google Chrome.*remote-debugging" 2>/dev/null || true');
-  await new Promise(function(r) { setTimeout(r, 1000); });
-
   // 支持 --account 参数单独运行指定账号
   var accountFilter = process.argv.indexOf('--account');
   var targetId = accountFilter >= 0 && process.argv[accountFilter + 1] ? process.argv[accountFilter + 1] : null;

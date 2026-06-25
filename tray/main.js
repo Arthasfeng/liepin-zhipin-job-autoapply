@@ -328,7 +328,6 @@ function stopAll() {
   if (childProcess) { childProcess.kill('SIGINT'); setTimeout(function() { if (childProcess) childProcess.kill('SIGKILL'); }, 5000); }
   isRunning = false;
   if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
-  try { fs.unlinkSync(STATUS_FILE); } catch(e) {}
   updateTrayMenu();
 }
 
@@ -421,19 +420,48 @@ ipcMain.on('schedule-saved', function(ev, dataStr) {
 });
 
 function showStats() {
-  var status = readStatus();
+  // 读取每日汇总统计
+  var dailyFile = '/tmp/auto-apply-daily-stats.json';
+  var daily = {};
+  try { daily = JSON.parse(fs.readFileSync(dailyFile, 'utf8')); } catch(e) {}
+
   var lines = [];
-  for (var id in status) {
-    var s = status[id];
-    var st = s.stats || {};
-    lines.push(s.name + ' [' + (s.platform || '') + ']');
-    lines.push('  ✅ 成功: ' + (st.success || 0));
-    lines.push('  ❌ 失败: ' + ((st.fail_chat || 0) + (st.fail_dialog || 0)));
-    lines.push('  ⏭ 跳过: ' + ((st.skip_chatted || 0) + (st.skip_processed || 0)));
-    if (s.frozen) lines.push('  ❄️ 已冻结');
+  var dates = Object.keys(daily).sort().slice(-7); // 最近7天
+
+  if (dates.length === 0) {
+    lines.push('暂无数据，请先运行一次。');
+  } else {
+    for (var di = 0; di < dates.length; di++) {
+      var date = dates[di];
+      var dayData = daily[date];
+      var accountIds = Object.keys(dayData).sort();
+      
+      lines.push('━━━ ' + date + ' ━━━');
+      
+      for (var ai = 0; ai < accountIds.length; ai++) {
+        var d = dayData[accountIds[ai]];
+        var rate = d.scanned > 0 ? (d.success / d.scanned * 100).toFixed(1) + '%' : '-';
+        lines.push(' ' + d.name + ' [' + (d.platform || '') + ']');
+        lines.push('   扫描: ' + d.scanned + ' | ✅成功: ' + d.success + ' | ❌失败: ' + d.fail + ' | ⏭跳过: ' + d.skip);
+        lines.push('   投递成功率: ' + rate);
+      }
+    }
     lines.push('');
+    // 汇总
+    var totalScanned = 0, totalSuccess = 0, totalFail = 0, totalSkip = 0;
+    dates.forEach(function(d) {
+      Object.keys(daily[d]).forEach(function(id) {
+        totalScanned += daily[d][id].scanned || 0;
+        totalSuccess += daily[d][id].success || 0;
+        totalFail += daily[d][id].fail || 0;
+        totalSkip += daily[d][id].skip || 0;
+      });
+    });
+    var totalRate = totalScanned > 0 ? (totalSuccess / totalScanned * 100).toFixed(1) + '%' : '-';
+    lines.push('━━━ 汇总 ━━━');
+    lines.push(' 总计扫描: ' + totalScanned + ' | ✅成功: ' + totalSuccess + ' | ❌失败: ' + totalFail + ' | ⏭跳过: ' + totalSkip);
+    lines.push(' 总投递成功率: ' + totalRate);
   }
-  if (lines.length === 0) lines.push('暂无数据，请先运行一次。');
 
   dialog.showMessageBox({
     type: 'info', title: '自动投递统计',

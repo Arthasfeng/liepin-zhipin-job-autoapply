@@ -6,3 +6,7 @@ node_modules/
 *.swo
 /tmp/auto-apply-*
 tray/tray-icon.png
+tray/gen-icon.js
+.hermes/
+METHODOLOGY.md
+VERSION.md
