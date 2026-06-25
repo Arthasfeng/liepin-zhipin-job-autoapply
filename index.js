@@ -44,6 +44,26 @@ function clearRunState(acctId) {
   try { fs.unlinkSync(statePath(acctId)); } catch(e) {}
 }
 
+// 账号运行锁 — 防止同一账号同时跑多个实例
+var LOCK_DIR = '/tmp/auto-apply-locks';
+try { fs.mkdirSync(LOCK_DIR, { recursive: true }); } catch(e) {}
+
+function tryLock(acctId) {
+  try {
+    var lockFile = LOCK_DIR + '/' + acctId + '.lock';
+    if (fs.existsSync(lockFile)) {
+      var pid = parseInt(fs.readFileSync(lockFile, 'utf8'), 10);
+      try { process.kill(pid, 0); return false; } catch(e) { /* 旧进程已死，可覆盖 */ }
+    }
+    fs.writeFileSync(lockFile, String(process.pid));
+    return true;
+  } catch(e) { return true; }
+}
+
+function releaseLock(acctId) {
+  try { fs.unlinkSync(LOCK_DIR + '/' + acctId + '.lock'); } catch(e) {}
+}
+
 // 每日汇总统计
 var DAILY_STATS_FILE = '/tmp/auto-apply-daily-stats.json';
 
@@ -569,6 +589,11 @@ async function main() {
         log('['+a.name+'] 无搜索关键词，跳过');
         return;
       }
+      // 账号运行锁：防止同一账号被多次启动
+      if (!tryLock(a.id)) {
+        log('['+a.name+'] 已有运行实例，跳过');
+        return;
+      }
       var port = 9222 + i;
       var eng = new ChromeEngine({remoteDebugPort: port, chromePath: CHROME_CONFIG.path});
       try {
@@ -581,6 +606,8 @@ async function main() {
         log('['+a.name+'] 完成');
       } catch(e) {
         log('['+a.name+'] 启动失败: '+e.message);
+      } finally {
+        releaseLock(a.id);
       }
     })();
   });
