@@ -420,47 +420,59 @@ ipcMain.on('schedule-saved', function(ev, dataStr) {
 });
 
 function showStats() {
-  // 读取每日汇总统计
   var dailyFile = '/tmp/auto-apply-daily-stats.json';
   var daily = {};
   try { daily = JSON.parse(fs.readFileSync(dailyFile, 'utf8')); } catch(e) {}
 
-  var lines = [];
-  var dates = Object.keys(daily).sort().slice(-7); // 最近7天
+  var lines = ['────── 自动投递 每日汇总 ──────'];
+  lines.push('');
 
+  var dates = Object.keys(daily).sort().slice(-7);
   if (dates.length === 0) {
     lines.push('暂无数据，请先运行一次。');
   } else {
+    // 表头：纯 ASCII 对齐，不用 emoji
+    lines.push(' 日期       扫描  成功  失败  跳过  成功率');
+    lines.push(' ────────  ───  ───  ───  ───  ─────');
+    
+    var grandScanned = 0, grandSuccess = 0, grandFail = 0, grandSkip = 0;
+
     for (var di = 0; di < dates.length; di++) {
       var date = dates[di];
       var dayData = daily[date];
-      var accountIds = Object.keys(dayData).sort();
-      
-      lines.push('━━━ ' + date + ' ━━━');
-      
-      for (var ai = 0; ai < accountIds.length; ai++) {
-        var d = dayData[accountIds[ai]];
-        var rate = d.scanned > 0 ? (d.success / d.scanned * 100).toFixed(1) + '%' : '-';
-        lines.push(' ' + d.name + ' [' + (d.platform || '') + ']');
-        lines.push('   扫描: ' + d.scanned + ' | ✅成功: ' + d.success + ' | ❌失败: ' + d.fail + ' | ⏭跳过: ' + d.skip);
-        lines.push('   投递成功率: ' + rate);
-      }
-    }
-    lines.push('');
-    // 汇总
-    var totalScanned = 0, totalSuccess = 0, totalFail = 0, totalSkip = 0;
-    dates.forEach(function(d) {
-      Object.keys(daily[d]).forEach(function(id) {
-        totalScanned += daily[d][id].scanned || 0;
-        totalSuccess += daily[d][id].success || 0;
-        totalFail += daily[d][id].fail || 0;
-        totalSkip += daily[d][id].skip || 0;
+      var dayScanned = 0, daySuccess = 0, dayFail = 0, daySkip = 0;
+
+      Object.keys(dayData).forEach(function(id) {
+        dayScanned += dayData[id].scanned || 0;
+        daySuccess += dayData[id].success || 0;
+        dayFail += dayData[id].fail || 0;
+        daySkip += dayData[id].skip || 0;
       });
-    });
-    var totalRate = totalScanned > 0 ? (totalSuccess / totalScanned * 100).toFixed(1) + '%' : '-';
-    lines.push('━━━ 汇总 ━━━');
-    lines.push(' 总计扫描: ' + totalScanned + ' | ✅成功: ' + totalSuccess + ' | ❌失败: ' + totalFail + ' | ⏭跳过: ' + totalSkip);
-    lines.push(' 总投递成功率: ' + totalRate);
+
+      var rate = dayScanned > 0 ? (daySuccess / dayScanned * 100).toFixed(1) + '%' : '  -';
+      // 固定宽度对齐
+      var str = ' ' + date +
+        '  ' + String(dayScanned).padStart(4) +
+        '  ' + String(daySuccess).padStart(4) +
+        '  ' + String(dayFail).padStart(4) +
+        '  ' + String(daySkip).padStart(4) +
+        '  ' + rate.padStart(6);
+      lines.push(str);
+
+      grandScanned += dayScanned;
+      grandSuccess += daySuccess;
+      grandFail += dayFail;
+      grandSkip += daySkip;
+    }
+
+    var grandRate = grandScanned > 0 ? (grandSuccess / grandScanned * 100).toFixed(1) + '%' : '  -';
+    lines.push(' ────────  ───  ───  ───  ───  ─────');
+    lines.push(' 合计' +
+      '  ' + String(grandScanned).padStart(4) +
+      '  ' + String(grandSuccess).padStart(4) +
+      '  ' + String(grandFail).padStart(4) +
+      '  ' + String(grandSkip).padStart(4) +
+      '  ' + grandRate.padStart(6));
   }
 
   dialog.showMessageBox({
