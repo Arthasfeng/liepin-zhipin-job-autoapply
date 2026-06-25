@@ -424,62 +424,36 @@ function showStats() {
   var daily = {};
   try { daily = JSON.parse(fs.readFileSync(dailyFile, 'utf8')); } catch(e) {}
 
-  var lines = ['────── 自动投递 每日汇总 ──────'];
-  lines.push('');
-
   var dates = Object.keys(daily).sort().slice(-7);
   if (dates.length === 0) {
-    lines.push('暂无数据，请先运行一次。');
-  } else {
-    // 表头：纯 ASCII 对齐，不用 emoji
-    lines.push(' 日期       扫描  成功  失败  跳过  成功率');
-    lines.push(' ────────  ───  ───  ───  ───  ─────');
-    
-    var grandScanned = 0, grandSuccess = 0, grandFail = 0, grandSkip = 0;
-
-    for (var di = 0; di < dates.length; di++) {
-      var date = dates[di];
-      var dayData = daily[date];
-      var dayScanned = 0, daySuccess = 0, dayFail = 0, daySkip = 0;
-
-      Object.keys(dayData).forEach(function(id) {
-        dayScanned += dayData[id].scanned || 0;
-        daySuccess += dayData[id].success || 0;
-        dayFail += dayData[id].fail || 0;
-        daySkip += dayData[id].skip || 0;
-      });
-
-      var rate = dayScanned > 0 ? (daySuccess / dayScanned * 100).toFixed(1) + '%' : '  -';
-      // 固定宽度对齐
-      var str = ' ' + date +
-        '  ' + String(dayScanned).padStart(4) +
-        '  ' + String(daySuccess).padStart(4) +
-        '  ' + String(dayFail).padStart(4) +
-        '  ' + String(daySkip).padStart(4) +
-        '  ' + rate.padStart(6);
-      lines.push(str);
-
-      grandScanned += dayScanned;
-      grandSuccess += daySuccess;
-      grandFail += dayFail;
-      grandSkip += daySkip;
-    }
-
-    var grandRate = grandScanned > 0 ? (grandSuccess / grandScanned * 100).toFixed(1) + '%' : '  -';
-    lines.push(' ────────  ───  ───  ───  ───  ─────');
-    lines.push(' 合计' +
-      '  ' + String(grandScanned).padStart(4) +
-      '  ' + String(grandSuccess).padStart(4) +
-      '  ' + String(grandFail).padStart(4) +
-      '  ' + String(grandSkip).padStart(4) +
-      '  ' + grandRate.padStart(6));
+    dialog.showMessageBox({ type: 'info', title: '自动投递统计', message: '暂无数据，请先运行一次。', buttons: ['确定'] });
+    return;
   }
 
-  dialog.showMessageBox({
-    type: 'info', title: '自动投递统计',
-    message: lines.join('\n'),
-    buttons: ['确定'],
-  });
+  var totalScan = 0, totalOk = 0, totalFail = 0, totalSkip = 0;
+  var text = '── 每日汇总 ──\n';
+  
+  for (var di = 0; di < dates.length; di++) {
+    var date = dates[di];
+    var dayData = daily[date];
+    var ds = 0, dsu = 0, df = 0, dsk = 0;
+    Object.keys(dayData).forEach(function(id) {
+      ds += dayData[id].scanned || 0;
+      dsu += dayData[id].success || 0;
+      df += dayData[id].fail || 0;
+      dsk += dayData[id].skip || 0;
+    });
+    var rate = ds > 0 ? (dsu / ds * 100).toFixed(1) + '%' : '-';
+    var parts = date.split('-');
+    var sd = parts[0].slice(2) + '/' + parseInt(parts[1]) + '/' + parseInt(parts[2]);
+    text += sd + ' 扫' + ds + ' 成' + dsu + ' 失' + df + ' 跳' + dsk + ' 率' + rate + '\n';
+    totalScan += ds; totalOk += dsu; totalFail += df; totalSkip += dsk;
+  }
+  
+  var totalRate = totalScan > 0 ? (totalOk / totalScan * 100).toFixed(1) + '%' : '-';
+  text += '合计 扫' + totalScan + ' 成' + totalOk + ' 失' + totalFail + ' 跳' + totalSkip + ' 率' + totalRate;
+
+  dialog.showMessageBox({ type: 'info', title: '自动投递统计', message: text, buttons: ['确定'] });
 }
 
 /* ====== 启动 ====== */
