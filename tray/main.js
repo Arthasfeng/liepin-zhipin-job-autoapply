@@ -298,7 +298,11 @@ function deleteAccount(accountId) {
 
 /* ====== 运行控制 ====== */
 function startAll(scheduleMode) {
-  if (isRunning) return;
+  var stack = new Error().stack.split('\n').slice(2,5).join(' → ');
+  console.log('[Tray] >>> startAll from:', stack);
+  // 写入文件供排查
+  try { fs.appendFileSync('/tmp/auto-apply-start.log', new Date().toISOString() + ' startAll scheduleMode=' + scheduleMode + ' stack=' + stack + '\n'); } catch(e) {}
+  if (isRunning) { console.log('[Tray] isRunning=true, ignored'); return; }
   childProcess = spawn('node', ['index.js'], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
   childProcess.stdout.on('data', function(d) { console.log(d.toString()); });
   childProcess.stderr.on('data', function(d) { console.error(d.toString()); });
