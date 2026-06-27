@@ -71,18 +71,22 @@ function loadDailyStats() {
   try { return JSON.parse(fs.readFileSync(DAILY_STATS_FILE, 'utf8')); } catch(e) { return {}; }
 }
 
-function saveDailyStats(acct, scanned, success, fail, skip) {
+function saveDailyStats(acct, scanned, success, fail, skip, skipBreakdown) {
   try {
     var all = loadDailyStats();
-    var today = new Date().toISOString().slice(0, 10);  // 2026-06-23
+    var today = new Date().toISOString().slice(0, 10);
     if (!all[today]) all[today] = {};
     var d = all[today];
-    if (!d[acct.id]) d[acct.id] = { name: acct.name, platform: acct.platform, scanned: 0, success: 0, fail: 0, skip: 0 };
+    if (!d[acct.id]) d[acct.id] = { name: acct.name, platform: acct.platform, scanned: 0, success: 0, fail: 0, skip: 0, skip_title: 0, skip_chatted: 0, skip_processed: 0 };
     d[acct.id].scanned += scanned || 0;
     d[acct.id].success += success || 0;
     d[acct.id].fail += fail || 0;
     d[acct.id].skip += skip || 0;
-    // 只保留最近7天
+    if (skipBreakdown) {
+      d[acct.id].skip_title += skipBreakdown.title || 0;
+      d[acct.id].skip_chatted += skipBreakdown.chatted || 0;
+      d[acct.id].skip_processed += skipBreakdown.processed || 0;
+    }
     var keys = Object.keys(all).sort();
     while (keys.length > 7) { delete all[keys.shift()]; }
     fs.writeFileSync(DAILY_STATS_FILE, JSON.stringify(all, null, 2));
@@ -355,6 +359,7 @@ class Runner {
           process.stdout.write('\u2705'); kwStats.success++;
           this._resetClocks();
           this._saveState({ stats: kwStats });
+          saveDailyStats(this.acct, kwStats.success + kwStats.fail + kwStats.skip, kwStats.success, kwStats.fail, kwStats.skip);
         } else if (r.status === 'skip') {
           process.stdout.write('\u23ed'); kwStats.skip++;
         } else if (r.status === 'paused') {
@@ -403,9 +408,14 @@ class Runner {
         stats: this.flow ? this.flow.stats : {}, kwStats: kwStats, frozen: this._frozen });
     }
 
-    // 保存每日统计
+    // 保存每日统计（含跳过原因细分）
     var totalCards = kwStats.success + kwStats.fail + kwStats.skip;
-    saveDailyStats(this.acct, totalCards, kwStats.success, kwStats.fail, kwStats.skip);
+    var flowSt = this.flow ? this.flow.stats : {};
+    saveDailyStats(this.acct, totalCards, kwStats.success, kwStats.fail, kwStats.skip, {
+      title: kwStats.skip_title || 0,
+      chatted: (flowSt.skip_chatted || 0),
+      processed: (flowSt.skip_processed || 0),
+    });
 
     var elapsed = Math.round((Date.now()-kwStartTime)/1000);
     log(''); log('\u2550\u2550\u2550'+this._kw+'\u2550\u2550\u2550');

@@ -78,7 +78,9 @@ function setupSchedule() {
     if (target <= now) target.setDate(target.getDate() + 1);
     
     var delay = target.getTime() - now.getTime();
+    console.log('[Tray] 定时器设置: ' + range.start + '~' + range.end + ' 延迟' + Math.round(delay/1000) + '秒');
     var timer = setTimeout(function() {
+      console.log('[Tray] ⏰ 定时器触发: ' + range.start + ' at ' + new Date().toLocaleTimeString());
       if (!isRunning) startAll(true);
       console.log('[Tray] 定时启动: ' + range.start);
       // 启动后设定时停止
@@ -446,18 +448,35 @@ function showStats() {
     var rate = ds > 0 ? (dsu / ds * 100).toFixed(1) + '%' : '-';
     var parts = date.split('-');
     var sd = parts[0].slice(2) + '/' + parseInt(parts[1]) + '/' + parseInt(parts[2]);
-    text += sd + ' 扫' + ds + ' 成' + dsu + ' 失' + df + ' 跳' + dsk + ' 率' + rate + '\n';
+    text += '\n' + sd + '\n  ' + String(ds).padStart(4) + '扫  ' + String(dsu).padStart(3) + '成  ' + String(df).padStart(3) + '失  ' + String(dsk).padStart(4) + '跳  ' + rate + '\n';
     totalScan += ds; totalOk += dsu; totalFail += df; totalSkip += dsk;
   }
   
   var totalRate = totalScan > 0 ? (totalOk / totalScan * 100).toFixed(1) + '%' : '-';
-  text += '合计 扫' + totalScan + ' 成' + totalOk + ' 失' + totalFail + ' 跳' + totalSkip + ' 率' + totalRate;
+  text += ' 合计\n  ' + String(totalScan).padStart(4) + '扫  ' + String(totalOk).padStart(3) + '成  ' + String(totalFail).padStart(3) + '失  ' + String(totalSkip).padStart(4) + '跳  ' + totalRate;
 
-  dialog.showMessageBox({ type: 'info', title: '自动投递统计', message: text, buttons: ['确定'] });
+  // 用 BrowserWindow 替代 dialog，支持左对齐
+  var win = new BrowserWindow({
+    width: 420, height: 320, resizable: false,
+    title: '自动投递统计', webPreferences: { nodeIntegration: true, contextIsolation: false },
+    autoHideMenuBar: true,
+  });
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>';
+  html += 'body{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;padding:16px;background:#f5f5f7;white-space:pre;margin:0}';
+  html += '</style></head><body>' + text.replace(/</g,'&lt;').replace(/\n/g,'<br>') + '</body></html>';
+  win.loadURL('data:text/html,' + encodeURIComponent(html));
 }
 
 /* ====== 启动 ====== */
-app.whenReady().then(function() {
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.whenReady().then(function() {
+  // 清理残留的子进程
+  try { process.kill(childProcess && childProcess.pid); } catch(e) {}
+  try { require('child_process').execSync('pkill -f "node index.js" 2>/dev/null || true'); } catch(e) {}
+
   // 隐藏程序坞图标（仅托盘）
   if (app.dock) app.dock.hide();
 
@@ -467,6 +486,6 @@ app.whenReady().then(function() {
   updateTrayMenu();
   setupSchedule();
   updateTrayMenu(); // 同步定时模式 checkbox 状态
-});
-
-app.on('window-all-closed', function() {});
+  });
+  app.on('window-all-closed', function() {});
+}
