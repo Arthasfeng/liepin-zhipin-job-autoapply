@@ -47,7 +47,7 @@ function getStatusText(acctId) {
 /* ====== 定时调度 ====== */
 function loadSchedule() {
   try {
-    var saved = JSON.parse(fs.readFileSync('/tmp/auto-apply-schedule.json', 'utf8'));
+    var saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), 'utf8'));
     return saved;
   } catch(e) {
     return { days: [0,1,2,3,4,5,6], ranges: [{start:'09:00',end:'12:00'},{start:'14:00',end:'18:00'}] };
@@ -415,7 +415,7 @@ ipcMain.on('schedule-saved', function(ev, dataStr) {
     var rangeStr = (data.ranges || []).map(function(r) { return r.start + '~' + r.end; }).join(', ');
     // 保存到文件并重载定时
     var s = JSON.stringify({ days: data.days || [], ranges: data.ranges || [] });
-    fs.writeFileSync('/tmp/auto-apply-schedule.json', s);
+    fs.writeFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), s);
     clearSchedule();
     setupSchedule();
     new Notification({

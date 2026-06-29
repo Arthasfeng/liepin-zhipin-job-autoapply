@@ -26,7 +26,7 @@ const DEFAULT_ACCOUNTS = [
   // },
 ];
 
-const ACCOUNT_FILE = '/tmp/auto-apply-config.json';
+const ACCOUNT_FILE = require('path').join(__dirname, 'accounts-data.json');
 
 // ===== 全局调度配置 =====
 const SCHEDULE = {

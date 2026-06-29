@@ -10,3 +10,5 @@ tray/gen-icon.js
 .hermes/
 METHODOLOGY.md
 VERSION.md
+config/accounts-data.json
+config/schedule-data.json
