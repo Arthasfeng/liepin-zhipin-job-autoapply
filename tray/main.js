@@ -44,7 +44,10 @@ function getStatusText(acctId) {
   return '⏹ ' + (s.status || '');
 }
 
-/* ====== 定时调度 ====== */
+/* ====== 定时调度（轮询模式，替代 setTimeout）====== */
+var POLL_INTERVAL = 60000; // 每60秒检查一次
+var pollTimer = null;
+
 function loadSchedule() {
   try {
     var saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), 'utf8'));
@@ -54,55 +57,51 @@ function loadSchedule() {
   }
 }
 
-function setupSchedule() {
-  clearSchedule();
-  var sched = loadSchedule();
+function isInRunTime(sched) {
   var now = new Date();
-  var currentDay = now.getDay(); // 0=Sun, 1=Mon...
-  var dayMap = [6,0,1,2,3,4,5]; // JS day → our day (Mon=0)
+  var currentDay = now.getDay();
+  var dayMap = [6,0,1,2,3,4,5];
   var today = dayMap[currentDay];
   
   // 检查今天是否在运行日内
-  if (sched.days && sched.days.indexOf(today) < 0) {
-    console.log('[Tray] 今天不在运行日');
-    return;
+  if (sched.days && sched.days.indexOf(today) < 0) return null;
+  
+  // 检查当前时间是否在某个时间区间内
+  var curMin = now.getHours() * 60 + now.getMinutes();
+  for (var i = 0; i < (sched.ranges || []).length; i++) {
+    var sp = sched.ranges[i].start.split(':');
+    var ep = sched.ranges[i].end.split(':');
+    var startMin = parseInt(sp[0]) * 60 + parseInt(sp[1]);
+    var endMin = parseInt(ep[0]) * 60 + parseInt(ep[1]);
+    if (curMin >= startMin && curMin < endMin) return sched.ranges[i];
+  }
+  return null;
+}
+
+function setupSchedule() {
+  clearSchedule();
+  var sched = loadSchedule();
+  
+  // 初始检查
+  var active = isInRunTime(sched);
+  if (active && !isRunning) {
+    console.log('[Tray] 启动定时: ' + active.start + '~' + active.end);
+    startAll(true);
   }
 
-  // 对每个时间区间，计算下次启动时间
-  (sched.ranges || []).forEach(function(range) {
-    var parts = range.start.split(':');
-    var target = new Date(now);
-    target.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
-    
-    // 如果已过今天这个时间，推到明天
-    if (target <= now) target.setDate(target.getDate() + 1);
-    
-    var delay = target.getTime() - now.getTime();
-    console.log('[Tray] 定时器设置: ' + range.start + '~' + range.end + ' 延迟' + Math.round(delay/1000) + '秒');
-    var timer = setTimeout(function() {
-      console.log('[Tray] ⏰ 定时器触发: ' + range.start + ' at ' + new Date().toLocaleTimeString());
-      if (!isRunning) startAll(true);
-      console.log('[Tray] 定时启动: ' + range.start);
-      // 启动后设定时停止
-      var endParts = range.end.split(':');
-      var stopTarget = new Date();
-      stopTarget.setHours(parseInt(endParts[0]), parseInt(endParts[1]), 0, 0);
-      if (stopTarget <= stopTarget) stopTarget.setDate(stopTarget.getDate() + 0);
-      var runDuration = stopTarget.getTime() - Date.now();
-      if (runDuration > 0) {
-        setTimeout(function() {
-          if (isRunning) stopAll();
-          console.log('[Tray] 定时停止: ' + range.end);
-        }, runDuration);
-      }
-    }, delay);
-    scheduleTimers.push(timer);
-    console.log('[Tray] 下次运行: ' + range.start + '~' + range.end + ' (延迟' + Math.round(delay/60000) + '分钟)');
-  });
+  // 每60秒轮询
+  pollTimer = setInterval(function() {
+    if (isRunning) return; // 已经在运行
+    var active = isInRunTime(sched);
+    if (active) {
+      console.log('[Tray] 轮询触发: ' + active.start + '~' + active.end);
+      startAll(true);
+    }
+  }, POLL_INTERVAL);
 }
 
 function clearSchedule() {
-  scheduleTimers.forEach(function(t) { clearTimeout(t); });
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   scheduleTimers = [];
 }
 
@@ -145,7 +144,7 @@ function updateTrayMenu() {
   var accounts = loadAccounts().filter(function(a) { return a.enabled; });
   var status = readStatus();
   var runningCount = Object.keys(status).filter(function(id) { return status[id].status === 'running'; }).length;
-  var statusLabel = isRunning ? '▶ 运行中 (' + runningCount + '个)' : (scheduleTimers.length > 0 ? '⏰ 定时待命' : '⏹ 已停止');
+  var statusLabel = isRunning ? '▶ 运行中 (' + runningCount + '个)' : (pollTimer ? '⏰ 定时待命' : '⏹ 已停止');
 
   var template = [
     { label: statusLabel, enabled: false },
@@ -157,9 +156,9 @@ function updateTrayMenu() {
     {
       label: '☐ 定时模式',
       type: 'checkbox',
-      checked: scheduleTimers.length > 0,
+      checked: !!pollTimer,
       click: function(item) {
-        if (item.checked) { scheduleTimers = [1]; setupSchedule(); }
+        if (item.checked) { setupSchedule(); }
         else { clearSchedule(); if (isRunning) stopAll(); }
         updateTrayMenu();
       },
