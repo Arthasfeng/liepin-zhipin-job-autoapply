@@ -2,7 +2,7 @@
  * 自动投递平台 — 系统托盘控制程序 v2.0
  * 应用窗口交互（非文本编辑器）
  */
-const { app, Menu, Tray, nativeImage, Notification, dialog, BrowserWindow, ipcMain } = require('electron');
+const { app, Menu, Tray, nativeImage, Notification, dialog, BrowserWindow, ipcMain, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -44,10 +44,7 @@ function getStatusText(acctId) {
   return '⏹ ' + (s.status || '');
 }
 
-/* ====== 定时调度（轮询模式，替代 setTimeout）====== */
-var POLL_INTERVAL = 60000; // 每60秒检查一次
-var pollTimer = null;
-
+/* ====== 定时调度（唤醒检查模式）====== */
 function loadSchedule() {
   try {
     var saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), 'utf8'));
@@ -57,52 +54,38 @@ function loadSchedule() {
   }
 }
 
-function isInRunTime(sched) {
+function isInSchedule() {
+  var sched = loadSchedule();
+  if (!sched.days || !sched.ranges) return false;
+  
   var now = new Date();
-  var currentDay = now.getDay();
   var dayMap = [6,0,1,2,3,4,5];
-  var today = dayMap[currentDay];
+  var today = dayMap[now.getDay()];
   
   // 检查今天是否在运行日内
-  if (sched.days && sched.days.indexOf(today) < 0) return null;
+  if (sched.days.indexOf(today) < 0) return false;
   
   // 检查当前时间是否在某个时间区间内
   var curMin = now.getHours() * 60 + now.getMinutes();
-  for (var i = 0; i < (sched.ranges || []).length; i++) {
+  for (var i = 0; i < sched.ranges.length; i++) {
     var sp = sched.ranges[i].start.split(':');
     var ep = sched.ranges[i].end.split(':');
     var startMin = parseInt(sp[0]) * 60 + parseInt(sp[1]);
     var endMin = parseInt(ep[0]) * 60 + parseInt(ep[1]);
-    if (curMin >= startMin && curMin < endMin) return sched.ranges[i];
+    if (curMin >= startMin && curMin < endMin) return true;
   }
-  return null;
+  return false;
 }
 
-function setupSchedule() {
-  clearSchedule();
-  var sched = loadSchedule();
-  
-  // 初始检查
-  var active = isInRunTime(sched);
-  if (active && !isRunning) {
-    console.log('[Tray] 启动定时: ' + active.start + '~' + active.end);
+function tryStartSchedule() {
+  if (!isRunning && isInSchedule()) {
+    console.log('[Tray] 定时触发');
     startAll(true);
   }
-
-  // 每60秒轮询
-  pollTimer = setInterval(function() {
-    if (isRunning) return; // 已经在运行
-    var active = isInRunTime(sched);
-    if (active) {
-      console.log('[Tray] 轮询触发: ' + active.start + '~' + active.end);
-      startAll(true);
-    }
-  }, POLL_INTERVAL);
 }
 
 function clearSchedule() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  scheduleTimers = [];
+  // 无需清理，没有定时器
 }
 
 /* ====== 窗口 ====== */
@@ -144,7 +127,7 @@ function updateTrayMenu() {
   var accounts = loadAccounts().filter(function(a) { return a.enabled; });
   var status = readStatus();
   var runningCount = Object.keys(status).filter(function(id) { return status[id].status === 'running'; }).length;
-  var statusLabel = isRunning ? '▶ 运行中 (' + runningCount + '个)' : (pollTimer ? '⏰ 定时待命' : '⏹ 已停止');
+  var statusLabel = isRunning ? '▶ 运行中 (' + runningCount + '个)' : '⏹ 已停止';
 
   var template = [
     { label: statusLabel, enabled: false },
@@ -156,10 +139,10 @@ function updateTrayMenu() {
     {
       label: '☐ 定时模式',
       type: 'checkbox',
-      checked: !!pollTimer,
+      checked: false,
       click: function(item) {
-        if (item.checked) { setupSchedule(); }
-        else { clearSchedule(); if (isRunning) stopAll(); }
+        if (item.checked) { }
+        else { if (isRunning) stopAll(); }
         updateTrayMenu();
       },
     },
@@ -487,7 +470,13 @@ if (!gotTheLock) {
   tray = new Tray(icon);
   tray.setPressedImage(icon);
   updateTrayMenu();
-  setupSchedule();
+  // 启动时检查是否需要运行
+  tryStartSchedule();
+  // 系统唤醒时重新检查
+  powerMonitor.on('resume', function() {
+    console.log('[Tray] 系统唤醒，检查定时');
+    tryStartSchedule();
+  });
   updateTrayMenu(); // 同步定时模式 checkbox 状态
   });
   app.on('window-all-closed', function() {});
