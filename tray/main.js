@@ -459,6 +459,14 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.whenReady().then(function() {
+  // 杀死其他托盘进程（确保本实例是唯一的）
+  try {
+    var myPid = process.pid;
+    require('child_process').execSync(
+      "ps aux | grep 'Electron.*tray/main.js' | grep -v grep | awk '{print $2}' | grep -v " + myPid + " | xargs kill 2>/dev/null || true"
+    );
+  } catch(e) {}
+
   // 清理残留的子进程
   try { process.kill(childProcess && childProcess.pid); } catch(e) {}
   try { require('child_process').execSync('pkill -f "node index.js" 2>/dev/null || true'); } catch(e) {}
