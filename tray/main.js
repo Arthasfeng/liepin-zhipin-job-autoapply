@@ -454,11 +454,7 @@ function showStats() {
 }
 
 /* ====== 启动 ====== */
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-} else {
-  app.whenReady().then(function() {
+app.whenReady().then(function() {
   // 杀死其他托盘进程（确保本实例是唯一的）
   try {
     var myPid = process.pid;
@@ -488,4 +484,3 @@ if (!gotTheLock) {
   updateTrayMenu(); // 同步定时模式 checkbox 状态
   });
   app.on('window-all-closed', function() {});
-}
