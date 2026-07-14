@@ -466,6 +466,8 @@ app.whenReady().then(function() {
   // 清理残留的子进程
   try { process.kill(childProcess && childProcess.pid); } catch(e) {}
   try { require('child_process').execSync('pkill -f "node index.js" 2>/dev/null || true'); } catch(e) {}
+  // 关闭之前遗留的 Chrome 窗口
+  try { require('child_process').execSync('pkill -f "Google Chrome.*remote-debugging" 2>/dev/null || true'); } catch(e) {}
 
   // 隐藏程序坞图标（仅托盘）
   if (app.dock) app.dock.hide();

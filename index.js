@@ -617,6 +617,8 @@ async function main() {
       } catch(e) {
         log('['+a.name+'] 启动失败: '+e.message);
       } finally {
+        // 关闭 Chrome 窗口，避免泄漏
+        eng.kill();
         releaseLock(a.id);
       }
     })();
