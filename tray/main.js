@@ -286,8 +286,8 @@ function startAll(scheduleMode) {
   try { fs.appendFileSync('/tmp/auto-apply-start.log', new Date().toISOString() + ' startAll scheduleMode=' + scheduleMode + ' stack=' + stack + '\n'); } catch(e) {}
   if (isRunning) { console.log('[Tray] isRunning=true, ignored'); return; }
   childProcess = spawn('node', ['index.js'], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
-  childProcess.stdout.on('data', function(d) { console.log(d.toString()); });
-  childProcess.stderr.on('data', function(d) { console.error(d.toString()); });
+  childProcess.stdout.on('data', function(d) { try { console.log(d.toString()); } catch(e) {} });
+  childProcess.stderr.on('data', function(d) { try { console.error(d.toString()); } catch(e) {} });
   childProcess.on('exit', function(code) {
     isRunning = false;
     updateTrayMenu();
