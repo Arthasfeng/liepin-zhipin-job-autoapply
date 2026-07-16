@@ -44,7 +44,10 @@ function getStatusText(acctId) {
   return '⏹ ' + (s.status || '');
 }
 
-/* ====== 定时调度（唤醒检查模式）====== */
+/* ====== 定时调度（启动检查 + 唤醒检查 + 5分钟轮询）====== */
+var SCHEDULE_CHECK_INTERVAL = 5 * 60 * 1000; // 5分钟
+var scheduleTimer = null;
+
 function loadSchedule() {
   try {
     var saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), 'utf8'));
@@ -85,7 +88,7 @@ function tryStartSchedule() {
 }
 
 function clearSchedule() {
-  // 无需清理，没有定时器
+  if (scheduleTimer) { clearInterval(scheduleTimer); scheduleTimer = null; }
 }
 
 /* ====== 窗口 ====== */
@@ -478,6 +481,8 @@ app.whenReady().then(function() {
   updateTrayMenu();
   // 启动时检查是否需要运行
   tryStartSchedule();
+  // 每5分钟检查一次（不阻止休眠）
+  scheduleTimer = setInterval(tryStartSchedule, SCHEDULE_CHECK_INTERVAL);
   // 系统唤醒时重新检查
   powerMonitor.on('resume', function() {
     console.log('[Tray] 系统唤醒，检查定时');
