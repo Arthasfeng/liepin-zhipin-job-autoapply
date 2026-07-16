@@ -44,8 +44,7 @@ function getStatusText(acctId) {
   return '⏹ ' + (s.status || '');
 }
 
-/* ====== 定时调度（启动检查 + 唤醒检查 + 5分钟轮询）====== */
-var SCHEDULE_CHECK_INTERVAL = 5 * 60 * 1000; // 5分钟
+/* ====== 定时调度（setTimeout 计算下次 + 唤醒补检）====== */
 var scheduleTimer = null;
 
 function loadSchedule() {
@@ -60,15 +59,10 @@ function loadSchedule() {
 function isInSchedule() {
   var sched = loadSchedule();
   if (!sched.days || !sched.ranges) return false;
-  
   var now = new Date();
   var dayMap = [6,0,1,2,3,4,5];
   var today = dayMap[now.getDay()];
-  
-  // 检查今天是否在运行日内
   if (sched.days.indexOf(today) < 0) return false;
-  
-  // 检查当前时间是否在某个时间区间内
   var curMin = now.getHours() * 60 + now.getMinutes();
   for (var i = 0; i < sched.ranges.length; i++) {
     var sp = sched.ranges[i].start.split(':');
@@ -87,8 +81,40 @@ function tryStartSchedule() {
   }
 }
 
+function scheduleNextRun() {
+  clearSchedule();
+  var sched = loadSchedule();
+  if (!sched.days || !sched.ranges || sched.days.length === 0 || sched.ranges.length === 0) return;
+  var now = new Date();
+  var dayMap = [6,0,1,2,3,4,5];
+  var curDay = dayMap[now.getDay()];
+  var curMin = now.getHours() * 60 + now.getMinutes();
+  for (var d = 0; d < 7; d++) {
+    var checkDay = (curDay + d) % 7;
+    if (sched.days.indexOf(checkDay) < 0) continue;
+    for (var i = 0; i < sched.ranges.length; i++) {
+      var sp = sched.ranges[i].start.split(':');
+      var startMin = parseInt(sp[0]) * 60 + parseInt(sp[1]);
+      if (d === 0 && startMin <= curMin) continue;
+      var target = new Date(now);
+      target.setDate(target.getDate() + d);
+      target.setHours(parseInt(sp[0]), parseInt(sp[1]), 0, 0);
+      var delay = target.getTime() - now.getTime();
+      if (delay > 0) {
+        scheduleTimer = setTimeout(function() {
+          console.log('[Tray] 定时触发');
+          if (!isRunning) startAll(true);
+          scheduleNextRun();
+        }, delay);
+        console.log('[Tray] 下次定时: ' + target.toLocaleString());
+        return;
+      }
+    }
+  }
+}
+
 function clearSchedule() {
-  if (scheduleTimer) { clearInterval(scheduleTimer); scheduleTimer = null; }
+  if (scheduleTimer) { clearTimeout(scheduleTimer); scheduleTimer = null; }
 }
 
 /* ====== 窗口 ====== */
@@ -481,8 +507,8 @@ app.whenReady().then(function() {
   updateTrayMenu();
   // 启动时检查是否需要运行
   tryStartSchedule();
-  // 每5分钟检查一次（不阻止休眠）
-  scheduleTimer = setInterval(tryStartSchedule, SCHEDULE_CHECK_INTERVAL);
+  // 排好下次定时
+  scheduleNextRun();
   // 系统唤醒时重新检查
   powerMonitor.on('resume', function() {
     console.log('[Tray] 系统唤醒，检查定时');
