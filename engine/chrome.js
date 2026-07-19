@@ -102,8 +102,22 @@ class ChromeEngine {
   sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   kill() {
-    if (this.ws) { try { this.ws.close(); } catch(e) {} }
-    if (this.proc) { this.proc.kill('SIGKILL'); this.proc = null; }
+    // 1. 先关闭 WebSocket
+    if (this.ws) { try { this.ws.close(); } catch(e) {} this.ws = null; }
+    // 2. 尝试通过 Node child_process kill
+    if (this.proc) { try { this.proc.kill('SIGKILL'); } catch(e) {} this.proc = null; }
+    // 3. 关键：按端口杀 Chrome（防止进程残留）
+    try {
+      var port = this.port;
+      var execSync = require('child_process').execSync;
+      // 找到占用端口的 Chrome PID 并杀掉
+      var out = execSync('lsof -ti :' + port + ' 2>/dev/null', { timeout: 3000 }).toString().trim();
+      if (out) {
+        out.split('\n').forEach(function(pid) {
+          try { process.kill(parseInt(pid), 'SIGKILL'); } catch(e) {}
+        });
+      }
+    } catch(e) {}
   }
 }
 

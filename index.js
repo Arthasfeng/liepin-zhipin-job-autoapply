@@ -606,6 +606,14 @@ async function main() {
       }
       var port = 9222 + i;
       var eng = new ChromeEngine({remoteDebugPort: port, chromePath: CHROME_CONFIG.path});
+      // 启动前杀掉占用该端口的旧 Chrome
+      try {
+        var oldPid = require('child_process').execSync('lsof -ti :' + port + ' 2>/dev/null', { timeout: 3000 }).toString().trim();
+        if (oldPid) {
+          log('['+a.name+'] 清理旧 Chrome (port:' + port + ', pid:' + oldPid + ')');
+          oldPid.split('\n').forEach(function(pid) { try { process.kill(parseInt(pid), 'SIGKILL'); } catch(e) {} });
+        }
+      } catch(e) {}
       try {
         await eng.start(a.profileDir || CHROME_CONFIG.userDataDir);
         await eng.connect();
