@@ -342,7 +342,14 @@ function runSingle(accountId) {
 }
 
 function stopAll() {
-  if (childProcess) { childProcess.kill('SIGINT'); setTimeout(function() { if (childProcess) childProcess.kill('SIGKILL'); }, 5000); }
+  if (childProcess) { 
+    childProcess.kill('SIGTERM'); 
+    setTimeout(function() { 
+      if (childProcess) childProcess.kill('SIGKILL'); 
+      // 兜底：确保 Chrome 窗口关闭
+      try { require('child_process').execSync('pkill -f "Google Chrome.*remote-debugging" 2>/dev/null || true'); } catch(e) {}
+    }, 5000); 
+  }
   isRunning = false;
   if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
   updateTrayMenu();

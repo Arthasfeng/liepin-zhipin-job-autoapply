@@ -606,6 +606,7 @@ async function main() {
       }
       var port = 9222 + i;
       var eng = new ChromeEngine({remoteDebugPort: port, chromePath: CHROME_CONFIG.path});
+      _allEngines.push(eng);
       // 启动前杀掉占用该端口的旧 Chrome
       try {
         var oldPid = require('child_process').execSync('lsof -ti :' + port + ' 2>/dev/null', { timeout: 3000 }).toString().trim();
@@ -635,8 +636,22 @@ async function main() {
   await Promise.all(runners);
 
   log('全部完成');
-  // 所有 Chrome 保持打开，用户查看投递历史
-  await new Promise(function() {}); // 永久等待
+  log('60秒后自动关闭 Chrome...');
+  await new Promise(function(r) { setTimeout(r, 60000); });
+
+  // 清理所有账号的 Chrome（端口 9222 起）
+  for (var i = 0; i < accounts.length; i++) {
+    var port = 9222 + i;
+    try {
+      var pids = require('child_process').execSync('lsof -ti :' + port + ' 2>/dev/null', { timeout: 3000 }).toString().trim();
+      if (pids) pids.split('\n').forEach(function(pid) { try { process.kill(parseInt(pid), 'SIGKILL'); } catch(e) {} });
+    } catch(e) {}
+  }
 }
+
+// 全局信号处理：确保 Chrome 被清理
+var _allEngines = [];
+process.on('SIGTERM', function() { _allEngines.forEach(function(e) { if (e) e.kill(); }); process.exit(0); });
+process.on('SIGINT', function() { _allEngines.forEach(function(e) { if (e) e.kill(); }); process.exit(0); });
 
 main().catch(e => { log('FATAL: '+e.message); process.exit(1); });
