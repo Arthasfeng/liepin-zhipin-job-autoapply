@@ -164,8 +164,8 @@ function clearSchedule() {
 /* ====== 窗口 ====== */
 function openLoginWindow() {
   var win = new BrowserWindow({
-    width: 560, height: 760, resizable: false,
-    title: '自动投递配置',
+    width: 600, height: 860, resizable: false,
+    title: '源圈求职自动刷',
     webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
   win.loadFile(path.join(__dirname, 'dialogs', 'login.html'));
