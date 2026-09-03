@@ -30,6 +30,50 @@ ipcMain.on('keywords-saved', function(ev, data) {
   }
 });
 
+ipcMain.on('login-config-saved', function(ev, payload) {
+  try {
+    var all = loadAccounts();
+    var created = [];
+    // 为每个新账号生成 id 并保存
+    (payload.accounts || []).forEach(function(acc, i) {
+      var id = acc.platform + '-' + Date.now() + '-' + i;
+      var newAcct = {
+        id: id,
+        name: acc.name,
+        platform: acc.platform,
+        profileDir: '/tmp/auto-apply/' + id,
+        keywords: {
+          search: payload.search || [],
+          jobTitle: payload.jobTitle || [],
+        },
+        greeting: payload.greeting || '您好，看到贵公司在找相关岗位候选人，方便沟通下吗？',
+        enabled: true,
+      };
+      all.push(newAcct);
+      created.push(newAcct.name);
+    });
+    saveAccounts(all);
+    updateTrayMenu();
+
+    // 通知
+    var msg = created.length > 0
+      ? '已创建账号: ' + created.join('、')
+      : '配置已更新';
+    new Notification({ title: '投递配置已保存', body: msg }).show();
+
+    // 根据投递方式决定动作
+    if (payload.mode === 'manual') {
+      // 手动投递：立即启动
+      startAll(false);
+    } else if (payload.mode === 'schedule') {
+      // 定时投递：排好定时
+      scheduleNextRun();
+    }
+  } catch(e) {
+    new Notification({ title: '配置失败', body: e.message }).show();
+  }
+});
+
 /* ====== 状态 ====== */
 function readStatus() {
   try { return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')); } catch(e) { return {}; }
@@ -118,6 +162,16 @@ function clearSchedule() {
 }
 
 /* ====== 窗口 ====== */
+function openLoginWindow() {
+  var win = new BrowserWindow({
+    width: 560, height: 760, resizable: false,
+    title: '自动投递配置',
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  win.loadFile(path.join(__dirname, 'dialogs', 'login.html'));
+  win.setMenuBarVisibility(false);
+}
+
 function openKeywordsWindow(accountId) {
   var all = loadAccounts();
   var acct = all.find(function(a) { return a.id === accountId; });
@@ -161,6 +215,10 @@ function updateTrayMenu() {
   var template = [
     { label: statusLabel, enabled: false },
     { type: 'separator' },
+    {
+      label: '⚙ 投递配置',
+      click: openLoginWindow,
+    },
     {
       label: isRunning ? '⏹ 停止所有' : '▶ 立即运行',
       click: isRunning ? stopAll : function() { startAll(false); },
@@ -512,6 +570,8 @@ app.whenReady().then(function() {
   tray = new Tray(icon);
   tray.setPressedImage(icon);
   updateTrayMenu();
+  // 首次启动自动打开配置窗口（作为登录/主界面）
+  openLoginWindow();
   // 启动时检查是否需要运行
   tryStartSchedule();
   // 排好下次定时
