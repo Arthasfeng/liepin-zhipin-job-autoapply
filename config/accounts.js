@@ -26,7 +26,11 @@ const DEFAULT_ACCOUNTS = [
   // },
 ];
 
-const ACCOUNT_FILE = require('path').join(__dirname, 'accounts-data.json');
+// 用户数据目录（打包后项目目录只读，数据存到用户主目录）
+const DATA_DIR = require('path').join(require('os').homedir(), '.yuanquan');
+try { require('fs').mkdirSync(DATA_DIR, { recursive: true }); } catch(e) {}
+
+const ACCOUNT_FILE = require('path').join(DATA_DIR, 'accounts-data.json');
 
 // ===== 全局调度配置 =====
 const SCHEDULE = {
@@ -73,7 +77,7 @@ function loadAccounts() {
 
 function saveAccounts(accounts) {
   const fs = require('fs');
-  require('fs').mkdirSync('/tmp/auto-apply', { recursive: true });
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch(e) {}
   fs.writeFileSync(ACCOUNT_FILE, JSON.stringify(accounts, null, 2));
 }
 

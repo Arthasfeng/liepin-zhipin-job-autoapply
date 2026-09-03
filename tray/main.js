@@ -9,6 +9,7 @@ const fs = require('fs');
 const { loadAccounts, saveAccounts, ACCOUNT_FILE, SCHEDULE } = require('../config/accounts');
 
 const STATUS_FILE = '/tmp/auto-apply-status.json';
+const SCHEDULE_FILE = require('path').join(require('os').homedir(), '.yuanquan', 'schedule-data.json');
 let tray = null;
 let childProcess = null;
 let isRunning = false;
@@ -93,7 +94,7 @@ var scheduleTimer = null;
 
 function loadSchedule() {
   try {
-    var saved = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), 'utf8'));
+    var saved = JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf8'));
     return saved;
   } catch(e) {
     return { days: [0,1,2,3,4,5,6], ranges: [{start:'09:00',end:'12:00'},{start:'14:00',end:'18:00'}] };
@@ -366,13 +367,23 @@ function deleteAccount(accountId) {
 }
 
 /* ====== 运行控制 ====== */
+function spawnNode(args) {
+  // 打包后用 Electron 内置 Node 运行核心逻辑，用户无需安装 Node.js
+  var env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
+  return spawn(process.execPath, args, {
+    cwd: path.join(__dirname, '..'),
+    env: env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
 function startAll(scheduleMode) {
   var stack = new Error().stack.split('\n').slice(2,5).join(' → ');
   console.log('[Tray] >>> startAll from:', stack);
   // 写入文件供排查
   try { fs.appendFileSync('/tmp/auto-apply-start.log', new Date().toISOString() + ' startAll scheduleMode=' + scheduleMode + ' stack=' + stack + '\n'); } catch(e) {}
   if (isRunning) { console.log('[Tray] isRunning=true, ignored'); return; }
-  childProcess = spawn('node', ['index.js'], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
+  childProcess = spawnNode(['index.js']);
   childProcess.stdout.on('data', function(d) { try { console.log(d.toString()); } catch(e) {} });
   childProcess.stderr.on('data', function(d) { try { console.error(d.toString()); } catch(e) {} });
   childProcess.on('exit', function(code) {
@@ -389,7 +400,7 @@ function startAll(scheduleMode) {
 
 function runSingle(accountId) {
   if (isRunning) return;
-  childProcess = spawn('node', ['index.js', '--account', accountId], { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
+  childProcess = spawnNode(['index.js', '--account', accountId]);
   childProcess.stdout.on('data', function(d) { console.log(d.toString()); });
   childProcess.stderr.on('data', function(d) { console.error(d.toString()); });
   childProcess.on('exit', function() { isRunning = false; updateTrayMenu(); });
@@ -491,7 +502,7 @@ ipcMain.on('schedule-saved', function(ev, dataStr) {
     var rangeStr = (data.ranges || []).map(function(r) { return r.start + '~' + r.end; }).join(', ');
     // 保存到文件并重载定时
     var s = JSON.stringify({ days: data.days || [], ranges: data.ranges || [] });
-    fs.writeFileSync(path.join(__dirname, '..', 'config', 'schedule-data.json'), s);
+    fs.writeFileSync(SCHEDULE_FILE, s);
     clearSchedule();
     setupSchedule();
     new Notification({

@@ -1,21 +1,51 @@
 {
-  "name": "auto-apply",
+  "name": "yuanquan-auto-apply",
   "version": "1.0.0",
-  "description": "猎聘/Boss直聘 自动化投递平台 — 多账号并行，健康值守，系统托盘控制",
-  "main": "index.js",
+  "description": "源圈求职自动刷 — 猎聘/Boss直聘 自动化投递平台",
+  "main": "tray/main.js",
   "scripts": {
     "start": "node index.js",
     "tray": "electron tray/main.js",
     "liepin": "node index.js --account liepin-a",
     "boss": "node index.js --account boss-a",
-    "menu": "node menu.js"
+    "menu": "node menu.js",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "license": "MIT",
   "type": "commonjs",
+  "build": {
+    "appId": "com.yuanquan.autoapply",
+    "productName": "源圈求职自动刷",
+    "asar": true,
+    "files": [
+      "tray/**/*",
+      "index.js",
+      "menu.js",
+      "engine/**/*",
+      "platforms/**/*",
+      "config/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "title": "源圈求职自动刷"
+    }
+  },
   "devDependencies": {
-    "electron": "^42.4.1"
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "left-pad": "^1.3.0"
   }
 }
