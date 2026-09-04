@@ -1,6 +1,6 @@
 {
   "name": "yuanquan-auto-apply",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "源圈求职自动刷 — 猎聘/Boss直聘 自动化投递平台",
   "author": "源圈求职",
   "main": "tray/main.js",
