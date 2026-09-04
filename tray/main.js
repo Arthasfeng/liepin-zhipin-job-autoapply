@@ -367,11 +367,21 @@ function deleteAccount(accountId) {
 }
 
 /* ====== 运行控制 ====== */
+function appRootDir() {
+  // 打包后(asar): Resources/app.asar.unpacked 是真实目录；开发模式: 项目根目录
+  if (process.resourcesPath) {
+    var unpacked = path.join(process.resourcesPath, 'app.asar.unpacked');
+    if (fs.existsSync(unpacked)) return unpacked;
+  }
+  return path.join(__dirname, '..');
+}
+
 function spawnNode(args) {
   // 打包后用 Electron 内置 Node 运行核心逻辑，用户无需安装 Node.js
   var env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
+  var root = appRootDir();
   return spawn(process.execPath, args, {
-    cwd: path.join(__dirname, '..'),
+    cwd: root,
     env: env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
