@@ -175,6 +175,10 @@ class BossFlow {
       }
       if (jobKey) this._processedIds.add(jobKey);
 
+      // 0b: 采集当前卡片结构化信息 (看板数据源; 失败不阻塞投递)
+      var cardInfo = null;
+      try { cardInfo = await this.getCardInfo(cardIndex); } catch (e) { cardInfo = null; }
+
       // 1: 点击卡片选中（触发详情面板）
       var cardOk = await this.clickCard(cardIndex);
       if (!cardOk) return { status:'fail', reason:'卡片不可点击' };
@@ -200,10 +204,24 @@ class BossFlow {
 
       this.stats.success++;
       this._consecutiveFail = 0;
-      return { status:'success' };
+      return { status:'success', jobKey: jobKey, info: cardInfo };
     } catch (e) {
       return { status:'fail', reason:e.message };
     }
+  }
+
+  /** 采集卡片结构化信息 (职位名/公司/薪资) — 供看板数据上报 */
+  async getCardInfo(cardIndex) {
+    try {
+      var info = await this.engine.evaluate(
+        '(function(i){var cards=document.querySelectorAll("div.job-card-wrap");'+
+        'if(i>=cards.length)return null;'+
+        'var c=cards[i];'+
+        'function tx(sel){var el=c.querySelector(sel);return el?(el.textContent||"").trim():"";}'+
+        'return JSON.stringify({title:tx("a.job-name"),company:tx(".company-name")||tx(".info-company")||tx(".company-text"),salary:tx(".salary")||tx(".job-salary"),area:tx(".job-area")||tx(".info-area")||""})})('+cardIndex+')'
+      );
+      return info ? JSON.parse(info) : null;
+    } catch(e) { return null; }
   }
 }
 

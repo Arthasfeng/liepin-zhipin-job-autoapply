@@ -642,6 +642,10 @@ class LiepinFlow {
         return { status: 'skip', reason: '已处理过' };
       }
 
+      // 0b: 采集卡片结构化信息 (看板数据源; 失败不阻塞投递)
+      var cardInfo = null;
+      try { cardInfo = await this.getCardInfo(cardIndex); } catch (e) { cardInfo = null; }
+
       // 0b: 检测卡片是否为"继续聊"（已沟通过）
       var chatted = await this.checkChatted(cardIndex);
       if (chatted) {
@@ -656,11 +660,11 @@ class LiepinFlow {
       // 1: doChat — hover + 点击聊天 + 等抽屉
       var chat = await this.doChat(cardIndex);
       if (chat.err) {
-        return { status: 'fail', reason: '聊天未打开' };
+        return { status: 'fail', reason: '聊天未打开', info: cardInfo };
       }
       if (chat.status === 'skip') {
         this.stats.skip_chatted++;
-        return { status: 'skip', reason: '继续聊' };
+        return { status: 'skip', reason: '继续聊', info: cardInfo };
       }
 
       // 2: sendResume — 发简历→打招呼→确认→验证
@@ -669,6 +673,8 @@ class LiepinFlow {
         this.stats.success++;
         this._consecutiveFail = this._consecutiveFail > 0 ? 0 : 0;
       }
+      send.info = cardInfo;
+      send.jobId = jobId;
 
       // 3: 关抽屉
       await this.withRetry(async function(){
@@ -693,6 +699,26 @@ class LiepinFlow {
       if (result.status === 'success') applied++;
     }
     return applied;
+  }
+
+  /** 采集卡片结构化信息 (职位名/公司/薪资/城市) — 供看板数据上报 */
+  async getCardInfo(cardIndex) {
+    try {
+      var info = await this.engine.evaluate(
+        '(function(i){'+
+        'var L=document.querySelectorAll(\'a[data-nick="job-detail-job-info"]\');'+
+        'if(i>=L.length)return null;'+
+        'var link=L[i];var title=(link.textContent||"").trim();'+
+        'var card=link;for(var d=0;d<6;d++){var r=card.getBoundingClientRect();if(r.width>300)break;card=card.parentElement;}'+
+        'var txt=(card.textContent||"").replace(/\\s+/g," ");'+
+        'function grab(prefix){var idx=txt.indexOf(prefix);if(idx<0)return "";var seg=txt.slice(idx,idx+120);var m=seg.match(/^.{0,60}?([^ ]{1,40}?)(?: |$)/);return m?m[1]:"";}'+
+        'var salary="";var sm=txt.match(/[¥￥]?\\s*\\d+(?:\\.\\d+)?\\s*[-~—]\\s*\\d+(?:\\.\\d+)?\\s*[Kk万]?|\\d+(?:\\.\\d+)?\\s*[Kk]\\s*[-~—]\\s*\\d+(?:\\.\\d+)?\\s*[Kk]/);if(sm)salary=sm[0].trim();'+
+        'var company="";var cm=txt.match(/[\\u4e00-\\u9fa5A-Za-z0-9（）()·&]+?(?:公司|集团|科技|网络|信息|有限|工作室)/);if(cm)company=cm[0];'+
+        'return JSON.stringify({title:title,company:company,salary:salary,area:""})'+
+        '})('+cardIndex+')'
+      );
+      return info ? JSON.parse(info) : null;
+    } catch(e) { return null; }
   }
 
   /** 翻页检测 */

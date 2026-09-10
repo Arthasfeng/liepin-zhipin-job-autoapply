@@ -2,7 +2,13 @@ const ChromeEngine = require('./engine/chrome');
 const LiepinFlow = require('./platforms/liepin');
 const BossFlow = require('./platforms/boss');
 const { CHROME_CONFIG, loadAccounts } = require('./config/accounts');
+const jobBoard = require('./jobboard-collector');
 const fs = require('fs');
+
+// 看板采集安全包装: 采集失败绝不阻断投递主流程 (旁路设计)
+function safeRecord(evt) {
+  try { jobBoard.record(evt); } catch (e) { /* 静默忽略采集错误 */ }
+}
 
 function log(m) { console.log('['+new Date().toLocaleTimeString()+'] '+m); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -355,6 +361,22 @@ class Runner {
         process.stdout.write('['+(i+1)+'/'+totalCards+'] ');
         var r = await this.flow.applyOne(i, greeting);
 
+        // 看板采集: 记录扫描到的职位
+        if (r && r.info) {
+          safeRecord({
+            account: this.acct.name || '', platform: 'boss', keyword: this._kw || '',
+            event_type: 'scanned', job_title: r.info.title || '', company: r.info.company || '',
+            city: r.info.area || '', salary: r.info.salary || '',
+          });
+        }
+        if (r && r.status === 'success') {
+          safeRecord({
+            account: this.acct.name || '', platform: 'boss', keyword: this._kw || '',
+            event_type: 'applied', job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
+            status: 'applied',
+          });
+        }
+
         if (r.status === 'success') {
           process.stdout.write('\u2705'); kwStats.success++;
           this._resetClocks();
@@ -498,6 +520,22 @@ class Runner {
 
         // 投递
         var r = await this.flow.applyOne(i, greeting);
+
+        // 看板采集: 猎聘扫描/投递上报
+        if (r && r.info) {
+          safeRecord({
+            account: this.acct.name || '', platform: 'liepin', keyword: typeof k !== 'undefined' ? k : '',
+            event_type: 'scanned', job_title: r.info.title || '', company: r.info.company || '',
+            city: r.info.area || '', salary: r.info.salary || '',
+          });
+        }
+        if (r && r.status === 'success') {
+          safeRecord({
+            account: this.acct.name || '', platform: 'liepin', keyword: typeof k !== 'undefined' ? k : '',
+            event_type: 'applied', job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
+            status: 'applied',
+          });
+        }
         
         if (r.status === 'success') {
           process.stdout.write('\u2705');
@@ -580,6 +618,13 @@ class Runner {
 }
 
 async function main() {
+  jobBoard.init('job-auto-apply');
+  // 硬超时兜底(2026-09-10 事故加固): 防止任何卡死让 launchd 永久认为 job 在运行
+  var _watchdog = setTimeout(function() {
+    log('WATCHDOG: 运行超过8小时，强制退出');
+    process.exit(1);
+  }, 8 * 3600 * 1000);
+  _watchdog.unref();
   // 支持 --account 参数单独运行指定账号
   var accountFilter = process.argv.indexOf('--account');
   var targetId = accountFilter >= 0 && process.argv[accountFilter + 1] ? process.argv[accountFilter + 1] : null;
@@ -636,6 +681,11 @@ async function main() {
   await Promise.all(runners);
 
   log('全部完成');
+  // 2026-09-10 加固: 无账号启动(全部被锁跳过)时立即退出, 不给僵死留机会
+  if (_allEngines.length === 0) {
+    log('本轮无账号启动(实例被跳过)，直接退出');
+    process.exit(0);
+  }
   log('60秒后自动关闭 Chrome...');
   await new Promise(function(r) { setTimeout(r, 60000); });
 
@@ -647,6 +697,11 @@ async function main() {
       if (pids) pids.split('\n').forEach(function(pid) { try { process.kill(parseInt(pid), 'SIGKILL'); } catch(e) {} });
     } catch(e) {}
   }
+
+  log('本轮结束，进程退出');
+  // 2026-09-10 事故根因修复: 必须显式退出。否则残留句柄(CDP连接/定时器)让事件循环
+  // 不空, 进程僵死, launchd 永远认为 job 运行中 → 阻塞后续所有调度(数据断流)
+  process.exit(0);
 }
 
 // 全局信号处理：确保 Chrome 被清理
