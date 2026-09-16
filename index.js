@@ -698,7 +698,10 @@ async function main() {
     } catch(e) {}
   }
 
-  log('本轮结束，进程退出');
+  // 2026-09-16: 退出前等待上报完成, 避免数据卡在 buffer 丢失
+  log('本轮结束，正在上报剩余数据...');
+  try { await jobBoard.flush(); } catch(e) {}
+  log('进程退出');
   // 2026-09-10 事故根因修复: 必须显式退出。否则残留句柄(CDP连接/定时器)让事件循环
   // 不空, 进程僵死, launchd 永远认为 job 运行中 → 阻塞后续所有调度(数据断流)
   process.exit(0);

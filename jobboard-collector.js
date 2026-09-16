@@ -143,6 +143,8 @@ function flush() {
         try { _buffer = JSON.parse(payload).events.concat(_buffer); saveBuffer(); } catch(e){}
         resolve();
       });
+      // 超时保护: 服务端无响应时避免 flush 永久挂起 (2026-09-16)
+      req.setTimeout(15000, function() { try { req.destroy(new Error('flush timeout')); } catch(e) {} });
       req.write(payload);
       req.end();
     } catch (e) {
@@ -152,24 +154,25 @@ function flush() {
   });
 }
 
-/** 同步 flush (进程退出时用) */
+/** 同步 flush (进程退出时用) — curl 同步发送，确保数据真正发出 */
 function flushSync() {
-  if (_buffer.length === 0) return;
-  // 尽力而为的同步请求
+  if (!_enabled || _buffer.length === 0) return;
+  const payload = JSON.stringify({ client: _clientName, events: _buffer });
   try {
-    const payload = JSON.stringify({ client: _clientName, events: _buffer });
-    const url = new URL(SERVER_URL + '/api/upload');
-    const mod = url.protocol === 'https:' ? https : http;
-    const req = mod.request(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-    });
-    req.on('error', () => {});
-    req.write(payload);
-    req.end();
+    // 2026-09-16 修复: 原实现用异步 http.request + 立即清空 buffer,
+    // 进程退出会中断未发出的请求 → 数据永久丢失。改用 curl 同步发送。
+    require('child_process').execSync(
+      "curl -s -m 10 -X POST " + JSON.stringify(SERVER_URL + '/api/upload') +
+      " -H 'Content-Type: application/json' --data-binary @-",
+      { input: payload, timeout: 12000, stdio: ['pipe', 'ignore', 'ignore'] }
+    );
     _buffer = [];
     saveBuffer();
-  } catch (e) {}
+    console.log('[JobBoard] 退出前同步上报成功 (' + JSON.parse(payload).events.length + ' 条)');
+  } catch (e) {
+    console.log('[JobBoard] 退出前同步上报失败(保留buffer待下次重发): ' + e.message);
+    saveBuffer();
+  }
 }
 
 module.exports = { init, record, recordScanned, recordApplyResult, recordReplied, flush };
