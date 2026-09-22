@@ -276,7 +276,7 @@ class Runner {
         this._loginFailed = true;
         log('['+a.name+'] ❌ 登录态失效: ' + loginDiag.why);
         this._alert('login-fail-' + a.id,
-          '❌ 账号 [' + a.name + '] 登录态失效\n原因: ' + loginDiag.why +
+          '❌ 登录态失效 — ' + a.name + ' (' + a.id + ')\n原因: ' + loginDiag.why +
           '\n时间: ' + new Date().toLocaleString('zh-CN') +
           '\n请重新登录该账号后再运行', true);
       }
@@ -340,7 +340,7 @@ class Runner {
       if (!appliedN && !this._loginFailed && scannedN > 0 &&
           APP_CONFIG.notify && APP_CONFIG.notify.alertOnZeroApply) {
         this._alert('zero-apply-' + a.id,
-          '⚠️ 账号 [' + a.name + '] 本轮 0 投递\n' +
+          '⚠️ 本轮 0 投递 — ' + a.name + ' (' + a.id + ')\n' +
           '跳过 ' + skippedN + ' | 失败 ' + failedN + '\n' +
           '疑似: 登录态失效 / 职位池耗尽 / 去重集合污染\n' +
           '时间: ' + new Date().toLocaleString('zh-CN'));
@@ -447,7 +447,7 @@ class Runner {
           this._frozen = true;
           if (APP_CONFIG.notify && APP_CONFIG.notify.alertOnFreeze) {
             this._alert('freeze-' + this.acct.id,
-              '⏸ 账号 [' + this.acct.name + '] 已冻结\n原因: ' + r.reason +
+              '⏸ 账号冻结 — ' + this.acct.name + ' (' + this.acct.id + ')\n原因: ' + r.reason +
               '\n时间: ' + new Date().toLocaleString('zh-CN'));
           }
           this._saveState({ stats: kwStats, paused: true, reason: r.reason });
