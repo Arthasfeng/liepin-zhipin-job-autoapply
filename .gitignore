@@ -12,4 +12,5 @@ METHODOLOGY.md
 VERSION.md
 config/accounts-data.json
 config/schedule-data.json
+config/notify.local.json
 dist/

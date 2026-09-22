@@ -1,0 +1,5 @@
+{
+  "_说明": "本文件是通知凭据的本地配置模板。真实文件名为 notify.local.json, 已被 .gitignore 排除, 不会提交。",
+  "_优先级": "环境变量 WECOM_WEBHOOK > 本文件 > config/defaults.js 的 notify.wecomWebhook",
+  "wecomWebhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的群机器人KEY"
+}

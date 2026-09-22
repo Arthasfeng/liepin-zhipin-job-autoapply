@@ -3,6 +3,8 @@ const LiepinFlow = require('./platforms/liepin');
 const BossFlow = require('./platforms/boss');
 const { CHROME_CONFIG, loadAccounts } = require('./config/accounts');
 const jobBoard = require('./jobboard-collector');
+const notifier = require('./notifier');
+const APP_CONFIG = require('./config/defaults');
 const fs = require('fs');
 
 // 看板采集安全包装: 采集失败绝不阻断投递主流程 (旁路设计)
@@ -161,6 +163,37 @@ class Runner {
     return b + encodeURIComponent(keyword);
   }
 
+  /**
+   * 登录态诊断 (2026-09-22 新增)
+   * 判断当前页面是否处于"未登录"状态。
+   * 注意: 猎聘未登录也能浏览职位列表, 所以本函数对猎聘可能漏判 —
+   *       猎聘的登录失效靠 run() 末尾的"0 投递告警"兜底。
+   */
+  async _diagnoseLogin() {
+    try {
+      var d = await this.engine.evaluate(`(function(){
+        var u = location.href || '';
+        var t = document.title || '';
+        var body = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 4000) : '';
+        if (/login|passport|signin|sign-in/i.test(u)) return {bad:true, why:'页面跳转到登录页 (' + u.slice(0,80) + ')'};
+        if (/扫码登录|密码登录|立即登录|登录\\/注册|手机号登录|验证码登录/.test(body)) return {bad:true, why:'页面出现登录入口 (未登录)'};
+        if (/登录|登陆/.test(t) && t.length < 20) return {bad:true, why:'页面标题含登录: ' + t};
+        return {bad:false, why:''};
+      })()`);
+      return { isLoginProblem: !!(d && d.bad), why: (d && d.why) || '未知' };
+    } catch (e) {
+      return { isLoginProblem: false, why: '' };
+    }
+  }
+
+  /** 发送异常告警 (旁路, 失败不影响主流程) */
+  _alert(type, text, force) {
+    try {
+      if (!(APP_CONFIG.notify)) return;
+      notifier.alert(type, text, force);
+    } catch (e) { /* 静默 */ }
+  }
+
   /** 缓存清理 — 导航到当前页 URL（不 location.reload，避免结果重排） */
   async _restartChrome(keepPage) {
     log('['+this.acct.name+'] 刷新缓存...');
@@ -237,6 +270,16 @@ class Runner {
       'document.querySelectorAll("'+cardSel+'").length'
     ).catch(()=>0);
     if (!finalCards) {
+      // 2026-09-22: 完全没有卡片极可能是登录态失效 — 诊断并告警
+      var loginDiag = await this._diagnoseLogin();
+      if (loginDiag.isLoginProblem) {
+        this._loginFailed = true;
+        log('['+a.name+'] ❌ 登录态失效: ' + loginDiag.why);
+        this._alert('login-fail-' + a.id,
+          '❌ 账号 [' + a.name + '] 登录态失效\n原因: ' + loginDiag.why +
+          '\n时间: ' + new Date().toLocaleString('zh-CN') +
+          '\n请重新登录该账号后再运行', true);
+      }
       log('['+a.name+'] 仍未加载卡片，尝试导航到搜索页...');
       var id = ++this.engine._mid;
       this.engine.ws.send(JSON.stringify({ id: id, method: 'Page.navigate', params: { url: this._searchUrl(a.keywords.search[0]) } }));
@@ -285,6 +328,25 @@ class Runner {
       (flowStats.fail_chat||0) + (flowStats.fail_resume||0) + (flowStats.fail_confirm||0) + (flowStats.fail_dialog||0),
       (flowStats.skip_chatted||0) + (flowStats.skip_processed||0)
     );
+
+    // 2026-09-22: 行为异常告警 — 整轮 0 投递 (疑似登录态失效/职位池耗尽/去重污染)
+    // 猎聘未登录时仍能看到职位列表 (不会走到"无卡片"分支), 靠这条兜底发现
+    try {
+      var appliedN = flowStats.success || 0;
+      var skippedN = (flowStats.skip_chatted||0) + (flowStats.skip_processed||0);
+      var failedN = (flowStats.fail_chat||0) + (flowStats.fail_resume||0) + (flowStats.fail_confirm||0) + (flowStats.fail_dialog||0);
+      var scannedN = skippedN + appliedN + failedN;
+      log('['+a.name+'] 本轮统计: 投递 '+appliedN+' | 跳过 '+skippedN+' | 失败 '+failedN);
+      if (!appliedN && !this._loginFailed && scannedN > 0 &&
+          APP_CONFIG.notify && APP_CONFIG.notify.alertOnZeroApply) {
+        this._alert('zero-apply-' + a.id,
+          '⚠️ 账号 [' + a.name + '] 本轮 0 投递\n' +
+          '跳过 ' + skippedN + ' | 失败 ' + failedN + '\n' +
+          '疑似: 登录态失效 / 职位池耗尽 / 去重集合污染\n' +
+          '时间: ' + new Date().toLocaleString('zh-CN'));
+      }
+    } catch (e) { /* 静默 */ }
+
     log('['+a.name+'] 完成');
   }
 
@@ -361,19 +423,14 @@ class Runner {
         process.stdout.write('['+(i+1)+'/'+totalCards+'] ');
         var r = await this.flow.applyOne(i, greeting);
 
-        // 看板采集: 记录扫描到的职位
-        if (r && r.info) {
+        // 看板采集: 上报每张卡片的处理结果 (2026-09-22 新增 status/reason, 让"跳过原因"可见)
+        if (r) {
           safeRecord({
             account: this.acct.name || '', platform: 'boss', keyword: this._kw || '',
-            event_type: 'scanned', job_title: r.info.title || '', company: r.info.company || '',
-            city: r.info.area || '', salary: r.info.salary || '',
-          });
-        }
-        if (r && r.status === 'success') {
-          safeRecord({
-            account: this.acct.name || '', platform: 'boss', keyword: this._kw || '',
-            event_type: 'applied', job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
-            status: 'applied',
+            event_type: r.status === 'success' ? 'applied' : 'scanned',
+            job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
+            city: (r.info && r.info.area) || '', salary: (r.info && r.info.salary) || '',
+            status: r.status || '', reason: r.reason || '',
           });
         }
 
@@ -388,6 +445,11 @@ class Runner {
           process.stdout.write('\u274c'); kwStats.fail++;
           log(''); log('['+this.acct.name+'] ⏸ '+r.reason+'，冻结此账号');
           this._frozen = true;
+          if (APP_CONFIG.notify && APP_CONFIG.notify.alertOnFreeze) {
+            this._alert('freeze-' + this.acct.id,
+              '⏸ 账号 [' + this.acct.name + '] 已冻结\n原因: ' + r.reason +
+              '\n时间: ' + new Date().toLocaleString('zh-CN'));
+          }
           this._saveState({ stats: kwStats, paused: true, reason: r.reason });
           break;
         } else {
@@ -521,19 +583,14 @@ class Runner {
         // 投递
         var r = await this.flow.applyOne(i, greeting);
 
-        // 看板采集: 猎聘扫描/投递上报
-        if (r && r.info) {
+        // 看板采集: 猎聘每张卡片的处理结果 (2026-09-22 新增 status/reason)
+        if (r) {
           safeRecord({
             account: this.acct.name || '', platform: 'liepin', keyword: typeof k !== 'undefined' ? k : '',
-            event_type: 'scanned', job_title: r.info.title || '', company: r.info.company || '',
-            city: r.info.area || '', salary: r.info.salary || '',
-          });
-        }
-        if (r && r.status === 'success') {
-          safeRecord({
-            account: this.acct.name || '', platform: 'liepin', keyword: typeof k !== 'undefined' ? k : '',
-            event_type: 'applied', job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
-            status: 'applied',
+            event_type: r.status === 'success' ? 'applied' : 'scanned',
+            job_title: (r.info && r.info.title) || '', company: (r.info && r.info.company) || '',
+            city: (r.info && r.info.area) || '', salary: (r.info && r.info.salary) || '',
+            status: r.status || '', reason: r.reason || '',
           });
         }
         
@@ -619,6 +676,23 @@ class Runner {
 
 async function main() {
   jobBoard.init('job-auto-apply');
+  // 2026-09-22: 企业微信通知初始化 (webhook 留空则静默关闭, 不影响主流程)
+  // 凭据优先级: 环境变量 WECOM_WEBHOOK > config/notify.local.json (不提交) > defaults.js
+  // 注意: 本项目发布在公开 GitHub 仓库, webhook URL 属凭据, 不要写进 defaults.js
+  try {
+    var notifyCfg = APP_CONFIG.notify || {};
+    var localWebhook = '';
+    try {
+      var localFile = require('path').join(__dirname, 'config', 'notify.local.json');
+      if (fs.existsSync(localFile)) {
+        localWebhook = (JSON.parse(fs.readFileSync(localFile, 'utf8')) || {}).wecomWebhook || '';
+      }
+    } catch (e) { log('读取 notify.local.json 失败(已忽略): ' + e.message); }
+    notifier.init(
+      process.env.WECOM_WEBHOOK || localWebhook || notifyCfg.wecomWebhook || '',
+      notifyCfg.alertCooldownMs || 0
+    );
+  } catch (e) { log('通知模块初始化失败(已忽略): ' + e.message); }
   // 硬超时兜底(2026-09-10 事故加固): 防止任何卡死让 launchd 永久认为 job 在运行
   var _watchdog = setTimeout(function() {
     log('WATCHDOG: 运行超过8小时，强制退出');

@@ -32,6 +32,15 @@ const DEFAULTS = {
     maxRunMinutes: 30,
   },
 
+  // 通知 (企业微信群机器人)
+  notify: {
+    wecomWebhook: '',                  // 企业微信群机器人 webhook URL; 留空=关闭。也可用环境变量 WECOM_WEBHOOK
+    alertCooldownMs: 30 * 60 * 1000,   // 同类告警冷却时间 (毫秒)
+    alertOnLoginFail: true,            // 登录态失效时告警
+    alertOnFreeze: true,               // 账号被冻结 (每日上限) 时告警
+    alertOnZeroApply: true,            // 单账号整轮 0 投递时告警 (疑似登录失效/异常)
+  },
+
   // 弹窗选择器（来自用户 DevTools 精确路径）
   selectors: {
     confirmModal: 'div.ant-im-modal-wrap.ant-im-modal-confirm-centered.ant-im-modal-centered',

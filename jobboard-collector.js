@@ -64,6 +64,7 @@ function record(evt) {
     city: '',
     salary: '',
     status: '',
+    reason: '',                       // 2026-09-22: 跳过/失败原因 (skip_title/继续聊/已处理过/聊天未打开...)
     ts: new Date().toISOString(),
   }, evt);
   _buffer.push(e);
