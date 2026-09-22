@@ -422,6 +422,8 @@ class Runner {
     modes.push({type:'recommend', value:''});
 
     this._resetClocks();
+    var consecutiveChatted = 0;   // 连续"已沟通过"计数 (投穿检测, 跨批次累计)
+    var switchedToRecommend = false;  // 是否已切过推荐流 (防死循环: 推荐流也投穿则结束本轮)
 
     while (this.running && !this._frozen) {
       // ===== 健康检查 =====
@@ -474,6 +476,7 @@ class Runner {
       // 处理可见的卡片
       for (var i = 0; i < totalCards && this.running; i++) {
         if (statuses[i] === 'skip_title') { process.stdout.write('\u23ed'); kwStats.skip++; continue; }
+        if (statuses[i] === 'skip_blacklist') { process.stdout.write('\u23ed'); kwStats.skip++; continue; }
         if (statuses[i] === 'skip') continue;
         if (statuses[i] !== 'chat' && statuses[i] !== 'new') continue;
 
@@ -519,7 +522,35 @@ class Runner {
           }
         }
         if (r.reason) process.stdout.write('['+r.reason+']');
+
+        // 投穿检测计数: 连续"已沟通过"累计, 成功投递则清零
+        if (r.reason === '已沟通过') { consecutiveChatted++; }
+        else if (r.status === 'success') { consecutiveChatted = 0; }
+
         await sleep(af.minCardGap);
+      }
+
+      // 投穿检测: 连续 N 张"已沟通过" → 切推荐流 (2026-09-22 新增)
+      var exhaustThreshold = (this.config.limits && this.config.limits.exhaustThreshold) ? this.config.limits.exhaustThreshold : 50;
+      if (consecutiveChatted >= exhaustThreshold) {
+        if (switchedToRecommend) {
+          // 推荐流也投穿 → 本轮结束, 等下周期 (防死循环)
+          log('['+this.acct.name+'] 推荐流也投穿 → 本轮结束, 等下周期');
+          this._alert('exhaust-all-' + this.acct.id,
+            '🔄 职位池彻底投穿 — ' + this.acct.name + ' (' + this.acct.id + ')\n' +
+            '搜索词 + 推荐流均已投穿\n本轮结束, 等下周期恢复\n' +
+            '时间: ' + new Date().toLocaleString('zh-CN'));
+          break;
+        }
+        log('['+this.acct.name+'] 连续 '+consecutiveChatted+' 张已沟通过 → 判定投穿, 切推荐流');
+        this._alert('exhaust-' + this.acct.id,
+          '🔄 职位池投穿 — ' + this.acct.name + ' (' + this.acct.id + ')\n' +
+          '连续 ' + consecutiveChatted + ' 张已沟通过\n已切换到推荐流\n' +
+          '时间: ' + new Date().toLocaleString('zh-CN'));
+        switchedToRecommend = true;
+        await this._switchBossMode({ type: 'recommend', value: '' });
+        consecutiveChatted = 0;
+        continue;   // 不 reset clocks, 让 3 分钟健康超时兜底
       }
 
       if (!hasWork) {
@@ -590,8 +621,18 @@ class Runner {
       await this.engine.evaluate('document.title="['+this.acct.name+'] 自动投递 - 期望:'+mode.value+'"').catch(function(){});
       log('['+this.acct.name+'] 切换到求职期望: '+mode.value);
     } else if (mode.type === 'recommend') {
-      await this.engine.evaluate('location.href="https://www.zhipin.com/web/geek/job?recommend=1"');
-      await sleep(3000);
+      // 2026-09-22: 切推荐流改用 CDP 真实点击 .synthesis (验证发现 el.click() 对 React tab 无效)
+      var rc = await this.engine.rect('.synthesis');
+      if (rc) {
+        await this.engine.mouseMove(rc.x, rc.y);
+        await sleep(200);
+        await this.engine.mouseClick(rc.x, rc.y);
+        await sleep(3000);
+      } else {
+        // 兜底: 找不到 .synthesis (可能已在推荐页或页面未加载) → 直接导航
+        await this.engine.evaluate('location.href="https://www.zhipin.com/web/geek/job"');
+        await sleep(3000);
+      }
       await this.engine.evaluate('document.title="['+this.acct.name+'] 自动投递 - 推荐"').catch(function(){});
       log('['+this.acct.name+'] 切换到推荐');
     }

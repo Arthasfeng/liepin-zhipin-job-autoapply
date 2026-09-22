@@ -115,18 +115,21 @@ class BossFlow {
     return after;
   }
 
-  /** 批量检测卡片状态 + 岗位关键词筛选 */
+  /** 批量检测卡片状态 + 岗位关键词筛选 (黑名单优先, 白名单兜底) */
   async getCardStatuses() {
     var filters = this.acct.keywords?.jobTitle || [];
+    var blacklist = (this.config.jobFilter && this.config.jobFilter.blacklist) || [];
     var filtersJS = JSON.stringify(filters);
+    var blacklistJS = JSON.stringify(blacklist);
     var statuses = await this.engine.evaluate(
-      '(function(){var filters='+filtersJS+';'+
+      '(function(){var filters='+filtersJS+';var blacklist='+blacklistJS+';'+
       'var cards=document.querySelectorAll("div.job-card-wrap");'+
       'var result=[];'+
       'for(var i=0;i<cards.length;i++){'+
       'var link=cards[i].querySelector("a.job-name");'+
       'if(!link){result.push("unknown");continue;}'+
       'var title=link.textContent.trim();'+
+      'if(blacklist.length>0){var bad=false;for(var b=0;b<blacklist.length;b++){if(title.indexOf(blacklist[b])>=0){bad=true;break;}}if(bad){result.push("skip_blacklist");continue;}}'+
       'if(filters.length>0){var match=false;for(var f=0;f<filters.length;f++){if(title.indexOf(filters[f])>=0){match=true;break;}}if(!match){result.push("skip_title");continue;}}'+
       'result.push("new");}'+
       'return result})()'
