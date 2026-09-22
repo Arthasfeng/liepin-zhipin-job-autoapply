@@ -164,26 +164,80 @@ class Runner {
   }
 
   /**
-   * 登录态诊断 (2026-09-22 新增)
-   * 判断当前页面是否处于"未登录"状态。
-   * 注意: 猎聘未登录也能浏览职位列表, 所以本函数对猎聘可能漏判 —
-   *       猎聘的登录失效靠 run() 末尾的"0 投递告警"兜底。
+   * 登录态诊断 v2 (2026-09-22 基于实测重写)
+   *
+   * 方法: 实地抓取"已登录列表页"与"未登录列表页"的真实特征做比对, 只用
+   *       双侧差异明确的特征判定。猎聘与 Boss 的特征不同, 分开处理。
+   *
+   * 实测结论 (2026-09-22, 两个平台各抓一组对照):
+   *   猎聘  已登录: cookie liepin_login_valid/user_name/user_photo + 头部"你好， 冯先生"
+   *         未登录: 头部"我是猎头 我是招聘方 登录/注册" + 按钮"登 录"
+   *   Boss  已登录: "退出登录"元素 + 头部"消息/简历/Bruce"
+   *         未登录: 头部"我要招聘 我要找工作 登录/注册"
+   *   ⚠️ 关键: 职位卡片数在两个状态下都为 42 (猎聘) — 零区分度!
+   *      所以绝不能用"卡片数=0"当登录判断依据 (v1 的误报根源)。
+   *
+   * 返回: { state: 'logged_in'|'logged_out'|'uncertain'|'unknown', why, strong }
+   *       uncertain / unknown 一律不触发告警 (宁可漏报, 不可误报)
    */
   async _diagnoseLogin() {
     try {
       var d = await this.engine.evaluate(`(function(){
         var u = location.href || '';
-        var t = document.title || '';
-        var body = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 4000) : '';
-        if (/login|passport|signin|sign-in/i.test(u)) return {bad:true, why:'页面跳转到登录页 (' + u.slice(0,80) + ')'};
-        if (/扫码登录|密码登录|立即登录|登录\\/注册|手机号登录|验证码登录/.test(body)) return {bad:true, why:'页面出现登录入口 (未登录)'};
-        if (/登录|登陆/.test(t) && t.length < 20) return {bad:true, why:'页面标题含登录: ' + t};
-        return {bad:false, why:''};
+        var body = (document.body && document.body.innerText) || '';
+        var head = body.slice(0, 4000);          // 头部导航 + 首屏文案
+        var cookies = document.cookie || '';
+
+        // 1) 明确跳转到登录页 — 最强信号
+        if (/\\/login|\\/passport|signin|sign-in/i.test(u)) {
+          return { state: 'logged_out', why: 'URL 跳转到登录页: ' + u.slice(0, 90), strong: true };
+        }
+
+        // 2) 已登录的正向特征
+        var inSig = [];
+        if (/liepin_login_valid|(^|;)\\s*user_name=|user_photo=/.test(cookies)) inSig.push('cookie(liepin_login_valid/user_name)');
+        if (/退出登录|退出帐号|注销登录/.test(head)) inSig.push('文案(退出登录)');
+        if (/你好[，,]\\s*\\S{1,12}/.test(head)) inSig.push('文案(你好，XX)');
+        // Boss 的"退出登录"藏在 DOM 元素里 (innerText 抓不到, 实测 count=1 已登录 / 0 未登录)
+        var hasLogoutEl = false;
+        try { hasLogoutEl = document.querySelectorAll('[class*="logout"], a[href*="logout"], [class*="log-out"]').length > 0; } catch(e) {}
+        if (hasLogoutEl) inSig.push('元素(退出登录)');
+        // Boss 已登录头部有"消息/简历"入口 (未登录时是"添加求职期望"), 仅作辅助不单独定案
+        var hasMsgNav = /消息/.test(head) && /简历/.test(head) && !/添加求职期望/.test(head);
+
+        // 3) 未登录的正向特征
+        var outSig = [];
+        if (/登录\\/注册|立即登录|扫码登录|密码登录|手机号登录|验证码登录/.test(head)) outSig.push('文案(登录/注册)');
+
+        if (inSig.length && !outSig.length) {
+          return { state: 'logged_in', why: inSig.join(' + '), strong: true };
+        }
+        if (outSig.length && !inSig.length) {
+          return { state: 'logged_out', why: outSig.join(' + '), strong: true };
+        }
+        if (inSig.length && outSig.length) {
+          return { state: 'uncertain', why: '特征冲突: 已登录[' + inSig.join(',') + '] vs 未登录[' + outSig.join(',') + ']', strong: false };
+        }
+        return { state: 'unknown', why: '页面无明确登录态特征(可能未加载完成)', strong: false };
       })()`);
-      return { isLoginProblem: !!(d && d.bad), why: (d && d.why) || '未知' };
+      return d || { state: 'unknown', why: 'no result', strong: false };
     } catch (e) {
-      return { isLoginProblem: false, why: '' };
+      return { state: 'unknown', why: 'err: ' + e.message, strong: false };
     }
+  }
+
+  /**
+   * 登录态确认 (连测两次, 间隔 5s) — 防瞬时抖动导致的误报
+   * 返回 true 表示"确认未登录"
+   */
+  async _confirmLoggedOut() {
+    var d1 = await this._diagnoseLogin();
+    if (d1.state !== 'logged_out' || !d1.strong) return false;
+    await sleep(5000);
+    var d2 = await this._diagnoseLogin();
+    if (d2.state !== 'logged_out' || !d2.strong) return false;
+    this._loginDiagWhy = d2.why;
+    return true;
   }
 
   /** 发送异常告警 (旁路, 失败不影响主流程) */
@@ -269,17 +323,21 @@ class Runner {
     var finalCards = await this.engine.evaluate(
       'document.querySelectorAll("'+cardSel+'").length'
     ).catch(()=>0);
+    // 2026-09-22 v2: 登录态检测独立于卡片数!
+    // 实测证明未登录也能看到 42 张卡片 (猎聘) / 15 张 (Boss), 卡片数零区分度。
+    // 连测两次 (间隔 5s) 确认, 避免页面加载中的瞬时抖动造成误报。
+    if (await this._confirmLoggedOut()) {
+      this._loginFailed = true;
+      log('['+a.name+'] ❌ 确认登录态失效: ' + (this._loginDiagWhy || ''));
+      this._alert('login-fail-' + a.id,
+        '❌ 登录态失效 — ' + a.name + ' (' + a.id + ')\n' +
+        '依据: ' + (this._loginDiagWhy || '') + '\n' +
+        '时间: ' + new Date().toLocaleString('zh-CN') + '\n' +
+        '请重新登录该账号后再运行', true);
+      return;   // 已确认未登录 → 跳过该账号, 不空跑浪费调度时间
+    }
+
     if (!finalCards) {
-      // 2026-09-22: 完全没有卡片极可能是登录态失效 — 诊断并告警
-      var loginDiag = await this._diagnoseLogin();
-      if (loginDiag.isLoginProblem) {
-        this._loginFailed = true;
-        log('['+a.name+'] ❌ 登录态失效: ' + loginDiag.why);
-        this._alert('login-fail-' + a.id,
-          '❌ 登录态失效 — ' + a.name + ' (' + a.id + ')\n原因: ' + loginDiag.why +
-          '\n时间: ' + new Date().toLocaleString('zh-CN') +
-          '\n请重新登录该账号后再运行', true);
-      }
       log('['+a.name+'] 仍未加载卡片，尝试导航到搜索页...');
       var id = ++this.engine._mid;
       this.engine.ws.send(JSON.stringify({ id: id, method: 'Page.navigate', params: { url: this._searchUrl(a.keywords.search[0]) } }));
